@@ -16,27 +16,28 @@ class User {
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
+    int toInt(dynamic v, [int fallback = 0]) {
+      if (v == null) return fallback;
+      if (v is int) return v;
+      return int.tryParse(v.toString()) ?? fallback;
+    }
+
     return User(
-      id: json['id'] as int,
-      username: json['username'] as String,
-      role: json['role'] as String,
-      makerId: json['maker_id'] as int,
-      member: json['member'] != null
-          ? MemberInfo.fromJson(
-              json['member'] as Map<String, dynamic>,
-            )
+      id: toInt(json['id']),
+      username: (json['username'] ?? '').toString(),
+      role: (json['role'] ?? 'member').toString(),
+      makerId: toInt(json['maker_id']),
+      member: json['member'] is Map<String, dynamic>
+          ? MemberInfo.fromJson(json['member'] as Map<String, dynamic>)
           : null,
-      spaceOwner: json['space_owner'] != null
-          ? SpaceOwnerInfo.fromJson(
-              json['space_owner'] as Map<String, dynamic>,
-            )
+      spaceOwner: json['space_owner'] is Map<String, dynamic>
+          ? SpaceOwnerInfo.fromJson(json['space_owner'] as Map<String, dynamic>)
           : null,
     );
   }
 
   bool get isMember => role == 'member';
-
-  bool get isAdmin => role == 'admin_space';
+  bool get isAdmin => role == 'admin_space' || role == 'admin';
 }
 
 class MemberInfo {
@@ -58,12 +59,12 @@ class MemberInfo {
 
   factory MemberInfo.fromJson(Map<String, dynamic> json) {
     return MemberInfo(
-      id: json['id'] as int,
-      namaMember: json['nama_member'] as String,
-      instansi: json['instansi'] as String?,
-      alamat: json['alamat'] as String?,
-      telp: json['telp'] as String?,
-      foto: json['foto'] as String?,
+      id: json['id'] is int ? json['id'] as int : int.tryParse(json['id']?.toString() ?? '0') ?? 0,
+      namaMember: (json['nama_member'] ?? json['nama'] ?? '').toString(),
+      instansi: json['instansi']?.toString(),
+      alamat: json['alamat']?.toString(),
+      telp: (json['telp'] ?? json['telepon'])?.toString(),
+      foto: json['foto']?.toString(),
     );
   }
 }
@@ -83,10 +84,10 @@ class SpaceOwnerInfo {
 
   factory SpaceOwnerInfo.fromJson(Map<String, dynamic> json) {
     return SpaceOwnerInfo(
-      id: json['id'] as int,
-      namaCoworking: json['nama_coworking'] as String?,
-      namaPemilik: json['nama_pemilik'] as String?,
-      telp: json['telp'] as String?,
+      id: json['id'] is int ? json['id'] as int : int.tryParse(json['id']?.toString() ?? '0') ?? 0,
+      namaCoworking: (json['nama_coworking'] ?? json['nama_space'])?.toString(),
+      namaPemilik: (json['nama_pemilik'] ?? json['nama'])?.toString(),
+      telp: (json['telp'] ?? json['telepon'])?.toString(),
     );
   }
 }

@@ -1,45 +1,128 @@
 import 'package:flutter/material.dart';
-import 'package:coworkingspace/services/reservation_service.dart';
+import '../../core/network/api_exception.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/utils/currency_formatter.dart';
+import '../../models/discount.dart';
+import '../../models/space.dart';
+import '../../services/discount_service.dart';
+import '../../services/reservation_service.dart';
+import '../../services/space_service.dart';
+import '../../widgets/app_button.dart';
+import '../../widgets/stitch_app_bar.dart';
 
 class BookingScreen extends StatefulWidget {
-  final Map<String, dynamic> spaceData;
+  final Space? space;
+  final Map<String, dynamic>? spaceData;
 
-  const BookingScreen({super.key, required this.spaceData});
+  const BookingScreen({
+    super.key,
+    this.space,
+    this.spaceData,
+  }) : assert(space != null || spaceData != null, 'Space or spaceData must be provided');
 
   @override
   State<BookingScreen> createState() => _BookingScreenState();
 }
 
 class _BookingScreenState extends State<BookingScreen> {
+  late final Space _space;
+  final ReservationService _reservationService = ReservationService();
+  final DiscountService _discountService = DiscountService();
+  final SpaceService _spaceService = SpaceService();
+
+  final TextEditingController _promoController = TextEditingController();
+
   DateTime _selectedDate = DateTime.now();
   TimeOfDay _selectedTime = const TimeOfDay(hour: 9, minute: 0);
   int _durationHours = 2;
   bool _isLoading = false;
+  bool _isCheckingPromo = false;
 
-  // Helper untuk format angka ke Rupiah standar (contoh: 50000 -> 50.000)
-  String _formatRupiah(int number) {
-    return number.toString().replaceAllMapped(
-          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-          (Match m) => '${m[1]}.',
-        );
+  List<Discount> _activeDiscounts = [];
+  Discount? _appliedDiscount;
+  String? _promoFeedback;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.space != null) {
+      _space = widget.space!;
+    } else {
+      _space = Space.fromJson(widget.spaceData!);
+    }
+
+    final now = DateTime.now();
+    if (now.hour >= 9 && now.hour < 21) {
+      _selectedTime = TimeOfDay(hour: now.hour + 1, minute: 0);
+    }
+
+    _loadActiveDiscounts();
   }
 
-  // Parser Harga dari String/Dynamic ke Int
-  int get _pricePerHour {
-    final rawPrice = widget.spaceData['price']?.toString() ?? '0';
-    final cleaned = rawPrice.replaceAll(RegExp(r'[^\d]'), '');
-    return int.tryParse(cleaned) ?? 0;
+  Future<void> _loadActiveDiscounts() async {
+    try {
+      final list = await _discountService.getActiveDiscounts();
+      if (!mounted) return;
+      setState(() => _activeDiscounts = list);
+    } catch (_) {}
   }
 
-  int get _totalPrice => _pricePerHour * _durationHours;
+  double get _subtotal => _space.hargaPerJam * _durationHours;
+  double get _discountAmount {
+    if (_appliedDiscount == null) return 0.0;
+    return _subtotal * (_appliedDiscount!.persentase / 100.0);
+  }
+  double get _totalPrice => (_subtotal - _discountAmount).clamp(0.0, double.infinity);
+
+  Future<void> _applyPromoCode(String code) async {
+    final cleanCode = code.trim();
+    if (cleanCode.isEmpty) {
+      setState(() {
+        _appliedDiscount = null;
+        _promoFeedback = null;
+      });
+      return;
+    }
+
+    setState(() => _isCheckingPromo = true);
+    try {
+      final discount = await _discountService.checkDiscount(cleanCode);
+      if (!mounted) return;
+      setState(() {
+        _appliedDiscount = discount;
+        _promoFeedback = 'Diskon ${discount.persentase.toInt()}% berhasil diterapkan';
+        _isCheckingPromo = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _appliedDiscount = null;
+        _promoFeedback = 'Kode promo tidak valid atau telah kedaluwarsa';
+        _isCheckingPromo = false;
+      });
+    }
+  }
 
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 30)),
+      lastDate: DateTime.now().add(const Duration(days: 60)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.primary,
+              onPrimary: Colors.white,
+              onSurface: AppColors.textPrimary,
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
+    if (!mounted) return;
     if (picked != null && picked != _selectedDate) {
       setState(() => _selectedDate = picked);
     }
@@ -49,56 +132,124 @@ class _BookingScreenState extends State<BookingScreen> {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: _selectedTime,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.primary,
+              onPrimary: Colors.white,
+              onSurface: AppColors.textPrimary,
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
+    if (!mounted) return;
     if (picked != null && picked != _selectedTime) {
       setState(() => _selectedTime = picked);
     }
   }
 
-  // Handler utama booking ke API backend
   Future<void> _handleBooking() async {
+    final now = DateTime.now();
+    final isToday = _selectedDate.year == now.year &&
+        _selectedDate.month == now.month &&
+        _selectedDate.day == now.day;
+
+    if (isToday) {
+      final startMinutes = _selectedTime.hour * 60 + _selectedTime.minute;
+      final nowMinutes = now.hour * 60 + now.minute;
+      if (startMinutes <= nowMinutes) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Jam mulai tidak boleh di waktu yang sudah lewat.'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+        return;
+      }
+    }
+
+    if (_space.id <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('ID Space tidak valid. Silakan pilih kembali space.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
-      // Format tanggal (YYYY-MM-DD) & jam (HH:mm)
       final formattedDate =
           "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
       final formattedTime =
           "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}";
 
-      // Safely parse ID Space (mensupport field 'id' atau 'space_id')
-      final dynamic rawId = widget.spaceData['id'] ?? widget.spaceData['space_id'];
-      final int validSpaceId = (rawId is int) 
-          ? rawId 
-          : int.tryParse(rawId?.toString() ?? '1') ?? 1;
+      // Verify availability
+      try {
+        final avail = await _spaceService.checkAvailability(
+          idSpace: _space.id,
+          tanggal: formattedDate,
+          jamMulai: formattedTime,
+          durasiJam: _durationHours,
+        );
+        if (avail['available'] == false || avail['is_available'] == false) {
+          if (!mounted) return;
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Jadwal bentrok. Ruangan sudah dipesan pada jam tersebut.'),
+              backgroundColor: AppColors.error,
+            ),
+          );
+          return;
+        }
+      } catch (_) {
+        // If availability check fails or backend has mock rule, proceed
+      }
 
-      // Kirim payload ke backend via service
-      await ReservationService().createReservation(
-  idSpace: validSpaceId,
-  tanggalReservasi: formattedDate,
-  jamMulai: formattedTime,
-  durasiJam: _durationHours,
-);
+      final promo = _promoController.text.trim();
+
+      await _reservationService.createReservation(
+        idSpace: _space.id,
+        tanggalReservasi: formattedDate,
+        jamMulai: formattedTime,
+        durasiJam: _durationHours,
+        idDiskon: _appliedDiscount?.id,
+        kodePromo: promo.isNotEmpty ? promo : null,
+      );
 
       if (!mounted) return;
       setState(() => _isLoading = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Reservasi berhasil dibuat!'),
-          backgroundColor: Colors.green,
+          content: Text('Reservasi berhasil dibuat! Silakan tunggu konfirmasi admin.'),
+          backgroundColor: AppColors.success,
         ),
       );
 
-      Navigator.pop(context);
+      Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppColors.error,
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Gagal membuat reservasi: ${e.toString()}'),
-          backgroundColor: Colors.redAccent,
+          content: Text('Gagal membuat reservasi: $e'),
+          backgroundColor: AppColors.error,
         ),
       );
     }
@@ -107,59 +258,54 @@ class _BookingScreenState extends State<BookingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, color: Colors.black, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Reservasi Space',
-          style: TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.bold,
-            fontSize: 18,
-          ),
-        ),
-        centerTitle: true,
+      backgroundColor: AppColors.canvas,
+      appBar: const StitchAppBar(
+        title: 'Reservasi Space',
+        subtitle: 'Pilih Jadwal & Konfirmasi',
       ),
       body: SafeArea(
         child: Column(
           children: [
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20.0),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Space Summary Card
+                    // Space Summary Card (Stitch Design)
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        border: Border.all(color: AppColors.border, width: 0.9),
+                        boxShadow: const [
+                          BoxShadow(color: Color(0x040F172A), blurRadius: 6, offset: Offset(0, 1)),
+                        ],
                       ),
                       child: Row(
                         children: [
                           ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Image.network(
-                              widget.spaceData['image'] ?? '',
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
                               width: 70,
                               height: 70,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, _) => Container(
-                                width: 70,
-                                height: 70,
-                                color: const Color(0xFFE2E8F0),
-                                child: const Icon(
-                                  Icons.image,
-                                  color: Color(0xFF94A3B8),
-                                ),
-                              ),
+                              color: const Color(0xFFEFF6FF),
+                              child: _space.fotoUrl != null && _space.fotoUrl!.isNotEmpty
+                                  ? Image.network(
+                                      _space.fotoUrl!,
+                                      width: 70,
+                                      height: 70,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (ctx, err, stack) => const Icon(
+                                        Icons.work_outline,
+                                        color: AppColors.accentBlue,
+                                      ),
+                                    )
+                                  : const Icon(
+                                      Icons.work_outline,
+                                      color: AppColors.accentBlue,
+                                    ),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -168,28 +314,32 @@ class _BookingScreenState extends State<BookingScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  widget.spaceData['name'] ?? 'Ruangan Space',
+                                  _space.namaSpace,
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                    color: Color(0xFF0F172A),
+                                    fontSize: 15,
+                                    color: AppColors.textPrimary,
                                   ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 3),
                                 Text(
-                                  widget.spaceData['location'] ?? '',
+                                  _space.lokasi ?? _space.displayTipe,
                                   style: const TextStyle(
                                     fontSize: 12,
-                                    color: Color(0xFF64748B),
+                                    color: AppColors.textSecondary,
                                   ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  'Rp ${_formatRupiah(_pricePerHour)} / jam',
+                                  '${CurrencyFormatter.formatRupiah(_space.hargaPerJam)} / jam',
                                   style: const TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.bold,
-                                    color: Color(0xFFF97316),
+                                    color: AppColors.secondary,
                                   ),
                                 ),
                               ],
@@ -199,15 +349,15 @@ class _BookingScreenState extends State<BookingScreen> {
                       ),
                     ),
 
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
 
                     // Pilih Tanggal
                     const Text(
                       'Pilih Tanggal',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        color: Color(0xFF0F172A),
+                        fontSize: 14,
+                        color: AppColors.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -215,38 +365,36 @@ class _BookingScreenState extends State<BookingScreen> {
                       onTap: () => _selectDate(context),
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 14,
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                          border: Border.all(color: AppColors.border, width: 0.9),
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              '${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}',
+                              '${_selectedDate.day.toString().padLeft(2, '0')}/${_selectedDate.month.toString().padLeft(2, '0')}/${_selectedDate.year}',
                               style: const TextStyle(
-                                fontSize: 14,
+                                fontSize: 13,
                                 fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary,
                               ),
                             ),
                             const Icon(
-                              Icons.calendar_month,
-                              color: Color(0xFF2563EB),
-                              size: 20,
+                              Icons.calendar_month_outlined,
+                              color: AppColors.accentBlue,
+                              size: 18,
                             ),
                           ],
                         ),
                       ),
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 14),
 
-                    // Pilih Jam & Durasi
+                    // Jam Mulai & Durasi
                     Row(
                       children: [
                         Expanded(
@@ -257,41 +405,39 @@ class _BookingScreenState extends State<BookingScreen> {
                                 'Jam Mulai',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                  color: Color(0xFF0F172A),
+                                  fontSize: 13,
+                                  color: AppColors.textPrimary,
                                 ),
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 6),
                               InkWell(
                                 onTap: () => _selectTime(context),
                                 borderRadius: BorderRadius.circular(12),
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 14,
+                                    horizontal: 14,
+                                    vertical: 12,
                                   ),
                                   decoration: BoxDecoration(
                                     color: Colors.white,
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: const Color(0xFFE2E8F0),
-                                    ),
+                                    border: Border.all(color: AppColors.border, width: 0.9),
                                   ),
                                   child: Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
                                       Text(
                                         _selectedTime.format(context),
                                         style: const TextStyle(
-                                          fontSize: 14,
+                                          fontSize: 13,
                                           fontWeight: FontWeight.w600,
+                                          color: AppColors.textPrimary,
                                         ),
                                       ),
                                       const Icon(
                                         Icons.access_time,
-                                        color: Color(0xFF2563EB),
-                                        size: 20,
+                                        color: AppColors.accentBlue,
+                                        size: 18,
                                       ),
                                     ],
                                   ),
@@ -300,7 +446,7 @@ class _BookingScreenState extends State<BookingScreen> {
                             ],
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -309,33 +455,25 @@ class _BookingScreenState extends State<BookingScreen> {
                                 'Durasi (Jam)',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                  color: Color(0xFF0F172A),
+                                  fontSize: 13,
+                                  color: AppColors.textPrimary,
                                 ),
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 6),
                               Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: Colors.white,
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: const Color(0xFFE2E8F0),
-                                  ),
+                                  border: Border.all(color: AppColors.border, width: 0.9),
                                 ),
                                 child: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     IconButton(
                                       icon: const Icon(Icons.remove, size: 18),
                                       onPressed: _durationHours > 1
-                                          ? () => setState(
-                                                () => _durationHours--,
-                                              )
+                                          ? () => setState(() => _durationHours--)
                                           : null,
                                     ),
                                     Text(
@@ -343,12 +481,14 @@ class _BookingScreenState extends State<BookingScreen> {
                                       style: const TextStyle(
                                         fontWeight: FontWeight.bold,
                                         fontSize: 14,
+                                        color: AppColors.textPrimary,
                                       ),
                                     ),
                                     IconButton(
                                       icon: const Icon(Icons.add, size: 18),
-                                      onPressed: () =>
-                                          setState(() => _durationHours++),
+                                      onPressed: _durationHours < 24
+                                          ? () => setState(() => _durationHours++)
+                                          : null,
                                     ),
                                   ],
                                 ),
@@ -359,24 +499,136 @@ class _BookingScreenState extends State<BookingScreen> {
                       ],
                     ),
 
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 18),
 
-                    // Rincian Pembayaran
+                    // Pilih Diskon Dropdown & Manual Input (Stitch Wireframe 4)
+                    const Text(
+                      'Pilih Diskon (Opsional)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    if (_activeDiscounts.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<Discount?>(
+                            isExpanded: true,
+                            hint: const Text('Pilih voucher diskon aktif...', style: TextStyle(fontSize: 13)),
+                            value: _appliedDiscount,
+                            items: [
+                              const DropdownMenuItem<Discount?>(
+                                value: null,
+                                child: Text('Tanpa Diskon', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                              ),
+                              ..._activeDiscounts.map((d) {
+                                return DropdownMenuItem<Discount?>(
+                                  value: d,
+                                  child: Text(
+                                    '${d.namaDiskon} - ${d.persentase.toInt()}%',
+                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                                  ),
+                                );
+                              }),
+                            ],
+                            onChanged: (val) {
+                              setState(() {
+                                _appliedDiscount = val;
+                                if (val != null) {
+                                  _promoController.text = val.namaDiskon;
+                                  _promoFeedback = 'Diskon ${val.persentase.toInt()}% berhasil dipilih';
+                                } else {
+                                  _promoController.clear();
+                                  _promoFeedback = null;
+                                }
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+
+                    // Manual Promo Code Input with "Terapkan" Button
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: TextField(
+                              controller: _promoController,
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                              decoration: const InputDecoration(
+                                hintText: 'Ketik kode kupon (opsional)',
+                                prefixIcon: Icon(Icons.confirmation_number_outlined, size: 20),
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(vertical: 14),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            minimumSize: const Size(88, 48),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          onPressed: _isCheckingPromo ? null : () => _applyPromoCode(_promoController.text),
+                          child: _isCheckingPromo
+                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              : const Text('Terapkan', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+
+                    if (_promoFeedback != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        _promoFeedback!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: _appliedDiscount != null ? AppColors.success : AppColors.error,
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 20),
+
+                    // Rincian Pembayaran Card (Stitch Wireframe 4)
                     const Text(
                       'Rincian Pembayaran',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        color: Color(0xFF0F172A),
+                        fontSize: 14,
+                        color: AppColors.textPrimary,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        border: Border.all(color: AppColors.border, width: 0.9),
+                        boxShadow: const [
+                          BoxShadow(color: Color(0x040F172A), blurRadius: 6, offset: Offset(0, 1)),
+                        ],
                       ),
                       child: Column(
                         children: [
@@ -384,37 +636,46 @@ class _BookingScreenState extends State<BookingScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                'Sewa ($_durationHours jam)',
-                                style: const TextStyle(
-                                  color: Color(0xFF64748B),
-                                ),
+                                'Subtotal ($_durationHours jam)',
+                                style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
                               ),
                               Text(
-                                'Rp ${_formatRupiah(_totalPrice)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
+                                CurrencyFormatter.formatRupiah(_subtotal),
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                               ),
                             ],
                           ),
+                          if (_appliedDiscount != null) ...[
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Diskon ${_appliedDiscount!.persentase.toInt()}% (${_appliedDiscount!.namaDiskon})',
+                                  style: const TextStyle(color: AppColors.success, fontSize: 13),
+                                ),
+                                Text(
+                                  '- ${CurrencyFormatter.formatRupiah(_discountAmount)}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.success),
+                                ),
+                              ],
+                            ),
+                          ],
                           const SizedBox(height: 8),
-                          const Row(
+                          Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
+                            children: const [
                               Text(
-                                'Biaya Layanan',
-                                style: TextStyle(color: Color(0xFF64748B)),
+                                'Biaya Layanan & Fasilitas',
+                                style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
                               ),
                               Text(
                                 'Gratis',
-                                style: TextStyle(
-                                  color: Colors.green,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                                style: TextStyle(color: AppColors.success, fontWeight: FontWeight.bold, fontSize: 13),
                               ),
                             ],
                           ),
-                          const Divider(height: 24),
+                          const Divider(height: 20),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
@@ -422,15 +683,16 @@ class _BookingScreenState extends State<BookingScreen> {
                                 'Total Bayar',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 15,
+                                  fontSize: 14,
+                                  color: AppColors.textPrimary,
                                 ),
                               ),
                               Text(
-                                'Rp ${_formatRupiah(_totalPrice)}',
+                                CurrencyFormatter.formatRupiah(_totalPrice),
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 16,
-                                  color: Color(0xFFF97316),
+                                  color: AppColors.secondary,
                                 ),
                               ),
                             ],
@@ -443,43 +705,17 @@ class _BookingScreenState extends State<BookingScreen> {
               ),
             ),
 
-            // Bottom Bar Button
+            // Bottom Confirmation Button
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               decoration: const BoxDecoration(
                 color: Colors.white,
-                border: Border(top: BorderSide(color: Color(0xFFF1F5F9))),
+                border: Border(top: BorderSide(color: AppColors.border)),
               ),
-              child: SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _handleBooking,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0F172A),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    elevation: 0,
-                  ),
-                  child: _isLoading
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text(
-                          'Konfirmasi Reservasi',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                            color: Colors.white,
-                          ),
-                        ),
-                ),
+              child: AppButton(
+                text: 'Konfirmasi Reservasi',
+                isLoading: _isLoading,
+                onPressed: _handleBooking,
               ),
             ),
           ],

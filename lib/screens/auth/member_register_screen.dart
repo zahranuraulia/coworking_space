@@ -1,6 +1,9 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:coworkingspace/services/auth_service.dart';
+import '../../core/network/api_exception.dart';
+import '../../core/theme/app_colors.dart';
+import '../../services/auth_service.dart';
+import '../../widgets/app_button.dart';
+import '../../widgets/app_text_field.dart';
 
 class MemberRegisterScreen extends StatefulWidget {
   const MemberRegisterScreen({super.key});
@@ -15,18 +18,20 @@ class _MemberRegisterScreenState extends State<MemberRegisterScreen> {
 
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
   final _namaMemberController = TextEditingController();
   final _instansiController = TextEditingController();
   final _alamatController = TextEditingController();
   final _telpController = TextEditingController();
 
-  bool _isObscure = true;
   bool _isLoading = false;
+  bool _agreeToTerms = false;
 
   @override
   void dispose() {
     _usernameController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     _namaMemberController.dispose();
     _instansiController.dispose();
     _alamatController.dispose();
@@ -34,8 +39,28 @@ class _MemberRegisterScreenState extends State<MemberRegisterScreen> {
     super.dispose();
   }
 
-  void _handleRegister() async {
+  Future<void> _handleRegister() async {
     if (!_formKey.currentState!.validate()) return;
+
+    if (_passwordController.text != _confirmPasswordController.text) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Konfirmasi password tidak cocok'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    if (!_agreeToTerms) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Anda harus menyetujui Syarat & Ketentuan untuk mendaftar.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
 
     setState(() => _isLoading = true);
 
@@ -49,64 +74,36 @@ class _MemberRegisterScreenState extends State<MemberRegisterScreen> {
         telp: _telpController.text.trim(),
       );
 
-      setState(() => _isLoading = false);
-
       if (!mounted) return;
+      setState(() => _isLoading = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Registrasi member berhasil! Silakan masuk.'),
-          backgroundColor: Colors.green,
+          backgroundColor: AppColors.success,
         ),
       );
 
       Navigator.pop(context);
-    } on DioException catch (e) {
-      setState(() => _isLoading = false);
+    } on ApiException catch (e) {
       if (!mounted) return;
-
-      String errorMessage = 'Gagal mendaftar. Periksa kembali data kamu.';
-      if (e.response != null && e.response?.data != null) {
-        final resData = e.response?.data;
-        if (resData is Map<String, dynamic> && resData.containsKey('message')) {
-          errorMessage = resData['message'].toString();
-        }
-      }
-
+      setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(errorMessage),
-          backgroundColor: Colors.redAccent,
+          content: Text(e.message),
+          backgroundColor: AppColors.error,
         ),
       );
     } catch (e) {
-      setState(() => _isLoading = false);
       if (!mounted) return;
-
+      setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Terjadi kesalahan: ${e.toString()}'),
-          backgroundColor: Colors.redAccent,
+          content: Text('Terjadi kesalahan: $e'),
+          backgroundColor: AppColors.error,
         ),
       );
     }
-  }
-
-  InputDecoration _inputDecoration(String hint, IconData icon) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
-      prefixIcon: Icon(icon, color: const Color(0xFF94A3B8)),
-      contentPadding: const EdgeInsets.symmetric(vertical: 16),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(30),
-        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(30),
-        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-      ),
-    );
   }
 
   @override
@@ -114,21 +111,11 @@ class _MemberRegisterScreenState extends State<MemberRegisterScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, color: Colors.black, size: 20),
-          onPressed: () => Navigator.maybePop(context),
-        ),
-        title: const Text(
-          'Daftar Member',
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 18),
-        ),
-        centerTitle: true,
+        title: const Text('Daftar Member'),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
           child: Form(
             key: _formKey,
             child: Column(
@@ -137,106 +124,147 @@ class _MemberRegisterScreenState extends State<MemberRegisterScreen> {
                 const Text(
                   'Buat Akun Member',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                    letterSpacing: -0.3,
+                  ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 const Text(
-                  'Daftar sebagai pengguna untuk memesan coworking space.',
+                  'Daftar sebagai pengguna untuk memesan ruang kerja dan meja kerja.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
                 ),
                 const SizedBox(height: 24),
 
-                const Text('Nama Lengkap', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1E293B))),
-                const SizedBox(height: 8),
-                TextFormField(
+                AppTextField(
+                  label: 'Nama Lengkap *',
+                  hintText: 'Masukkan nama lengkap Anda',
                   controller: _namaMemberController,
-                  validator: (val) => val == null || val.isEmpty ? 'Nama lengkap wajib diisi' : null,
-                  decoration: _inputDecoration('Masukkan nama lengkap', Icons.badge_outlined),
+                  prefixIcon: Icons.badge_outlined,
+                  validator: (val) =>
+                      val == null || val.trim().isEmpty ? 'Nama lengkap wajib diisi' : null,
                 ),
                 const SizedBox(height: 16),
 
-                const Text('Username', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1E293B))),
-                const SizedBox(height: 8),
-                TextFormField(
+                AppTextField(
+                  label: 'Username *',
+                  hintText: 'Masukkan username unik',
                   controller: _usernameController,
-                  validator: (val) => val == null || val.isEmpty ? 'Username wajib diisi' : null,
-                  decoration: _inputDecoration('Masukkan username', Icons.person_outline),
+                  prefixIcon: Icons.person_outline,
+                  validator: (val) =>
+                      val == null || val.trim().isEmpty ? 'Username wajib diisi' : null,
                 ),
                 const SizedBox(height: 16),
 
-                const Text('Nomor Telepon / HP', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1E293B))),
-                const SizedBox(height: 8),
-                TextFormField(
+                AppTextField(
+                  label: 'Nomor Telepon / HP *',
+                  hintText: 'Contoh: 081234567890',
                   controller: _telpController,
                   keyboardType: TextInputType.phone,
-                  decoration: _inputDecoration('Contoh: 08123456789', Icons.phone_outlined),
+                  prefixIcon: Icons.phone_outlined,
+                  validator: (val) =>
+                      val == null || val.trim().isEmpty ? 'Nomor telepon wajib diisi' : null,
                 ),
                 const SizedBox(height: 16),
 
-                const Text('Instansi / Perusahaan (Opsional)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1E293B))),
-                const SizedBox(height: 8),
-                TextFormField(
+                AppTextField(
+                  label: 'Instansi / Perusahaan (Opsional)',
+                  hintText: 'Contoh: Universitas Indonesia / PT Maju',
                   controller: _instansiController,
-                  decoration: _inputDecoration('Masukkan instansi atau kampus', Icons.business_outlined),
+                  prefixIcon: Icons.business_outlined,
                 ),
                 const SizedBox(height: 16),
 
-                const Text('Alamat (Opsional)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1E293B))),
-                const SizedBox(height: 8),
-                TextFormField(
+                AppTextField(
+                  label: 'Alamat (Opsional)',
+                  hintText: 'Masukkan alamat tempat tinggal',
                   controller: _alamatController,
-                  decoration: _inputDecoration('Masukkan alamat tempat tinggal', Icons.home_outlined),
+                  prefixIcon: Icons.home_outlined,
                 ),
                 const SizedBox(height: 16),
 
-                const Text('Password', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1E293B))),
-                const SizedBox(height: 8),
-                TextFormField(
+                AppTextField(
+                  label: 'Password *',
+                  hintText: 'Minimal 6 karakter',
                   controller: _passwordController,
-                  obscureText: _isObscure,
-                  validator: (val) => val == null || val.length < 6 ? 'Password minimal 6 karakter' : null,
-                  decoration: _inputDecoration('Masukkan kata sandi', Icons.lock_outline).copyWith(
-                    suffixIcon: IconButton(
-                      icon: Icon(_isObscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: const Color(0xFF94A3B8)),
-                      onPressed: () => setState(() => _isObscure = !_isObscure),
-                    ),
-                  ),
+                  prefixIcon: Icons.lock_outline,
+                  isPassword: true,
+                  validator: (val) =>
+                      val == null || val.length < 6 ? 'Password minimal 6 karakter' : null,
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 16),
 
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _handleRegister,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0F172A),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                    elevation: 0,
-                  ),
-                  child: _isLoading
-                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text('DAFTAR SEBAGAI MEMBER', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                            SizedBox(width: 8),
-                            Icon(Icons.arrow_forward, color: Colors.white, size: 18),
-                          ],
-                        ),
+                AppTextField(
+                  label: 'Konfirmasi Password *',
+                  hintText: 'Ulangi password Anda',
+                  controller: _confirmPasswordController,
+                  prefixIcon: Icons.lock_outline,
+                  isPassword: true,
+                  textInputAction: TextInputAction.done,
+                  validator: (val) {
+                    if (val == null || val.isEmpty) return 'Konfirmasi password wajib diisi';
+                    if (val != _passwordController.text) return 'Password tidak cocok';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                // Checkbox Terms
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      height: 24,
+                      width: 24,
+                      child: Checkbox(
+                        value: _agreeToTerms,
+                        activeColor: AppColors.primary,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                        onChanged: (v) => setState(() => _agreeToTerms = v ?? false),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Saya setuju dengan Syarat & Ketentuan layanan reservasi coworking space.',
+                        style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 24),
+
+                AppButton(
+                  text: 'DAFTAR',
+                  isLoading: _isLoading,
+                  onPressed: _handleRegister,
+                ),
+                const SizedBox(height: 20),
 
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text('Sudah punya akun? ', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                    const Text(
+                      'Sudah punya akun? ',
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                    ),
                     GestureDetector(
                       onTap: () => Navigator.pop(context),
-                      child: const Text('Masuk Akun', style: TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.bold, fontSize: 13)),
+                      child: const Text(
+                        'Masuk Akun',
+                        style: TextStyle(
+                          color: AppColors.accentBlue,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
               ],
             ),
           ),

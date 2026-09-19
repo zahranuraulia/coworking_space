@@ -5,13 +5,17 @@ import '../models/space.dart';
 class SpaceService {
   final ApiClient _apiClient = ApiClient();
 
-  Future<List<Space>> getSpaces() async {
+  Future<List<Space>> getSpaces({String? tipe, String? search}) async {
     final response = await _apiClient.get(
       ApiConstants.spaces,
+      queryParameters: {
+        if (tipe != null && tipe.isNotEmpty && tipe != 'Semua') 'tipe': tipe,
+        if (search != null && search.isNotEmpty) 'search': search,
+      },
     );
 
     final responseData = response.data as Map<String, dynamic>;
-    final data = responseData['data'] as List<dynamic>;
+    final data = (responseData['data'] as List<dynamic>?) ?? [];
 
     return data
         .map(
@@ -20,6 +24,19 @@ class SpaceService {
           ),
         )
         .toList();
+  }
+
+  Future<Space> getSpaceDetail(int id) async {
+    final response = await _apiClient.get(ApiConstants.spaceDetail(id));
+    final responseData = response.data as Map<String, dynamic>;
+    return Space.fromJson(responseData['data'] as Map<String, dynamic>);
+  }
+
+  Future<List<Map<String, dynamic>>> getSpaceTypes() async {
+    final response = await _apiClient.get(ApiConstants.spaceTypes);
+    final responseData = response.data as Map<String, dynamic>;
+    final list = (responseData['data'] as List<dynamic>?) ?? [];
+    return list.map((e) => e as Map<String, dynamic>).toList();
   }
 
   Future<Map<String, dynamic>> checkAvailability({
@@ -39,7 +56,6 @@ class SpaceService {
     );
 
     final responseData = response.data as Map<String, dynamic>;
-
-    return responseData['data'] as Map<String, dynamic>;
+    return (responseData['data'] as Map<String, dynamic>?) ?? {};
   }
 }

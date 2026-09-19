@@ -1,46 +1,12 @@
-import 'package:dio/dio.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../core/constants/api_constants.dart';
+import '../core/network/api_client.dart';
+import '../models/e_ticket.dart';
+import '../models/reservation.dart';
 
 class ReservationService {
-  static const String _baseUrl = 'https://learn.smktelkom-mlg.sch.id/coworking/api';
-  static const String _makerKey = 'mk_default_ukk_2026';
+  final ApiClient _apiClient = ApiClient();
 
-
-  final Dio _dio = Dio(
-    BaseOptions(
-      baseUrl: _baseUrl,
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 15),
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'x-maker-key': _makerKey,
-      },
-    ),
-  );
-
-  Future<Map<String, String>> _authHeader() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    return token != null ? {'Authorization': 'Bearer $token'} : {};
-  }
-
-  Future<Map<String, dynamic>> login(String username, String password) async {
-    final response = await _dio.post('/auth/login', data: {
-      'username': username,
-      'password': password,
-    });
-    if (response.statusCode == 200 && response.data['status'] == true) {
-      final token = response.data['data']?['access_token'];
-      final role = response.data['data']?['role'];
-      final prefs = await SharedPreferences.getInstance();
-      if (token != null) await prefs.setString('auth_token', token);
-      if (role != null) await prefs.setString('role', role);
-    }
-    return response.data;
-  }
-
-  // POST /api/reservasi
+  // POST /api/reservasi - Buat reservasi baru
   Future<Map<String, dynamic>> createReservation({
     required int idSpace,
     required String tanggalReservasi,
@@ -49,90 +15,104 @@ class ReservationService {
     int? idDiskon,
     String? kodePromo,
   }) async {
-    final headers = await _authHeader();
-    final response = await _dio.post(
-      '/reservasi',
+    final response = await _apiClient.post(
+      ApiConstants.reservations,
       data: {
         'id_space': idSpace,
         'tanggal_reservasi': tanggalReservasi,
         'jam_mulai': jamMulai,
         'durasi_jam': durasiJam,
-        if (idDiskon != null) 'id_diskon': idDiskon,
-        if (kodePromo != null) 'kode_promo': kodePromo,
+        'id_diskon': ?idDiskon,
+        if (kodePromo != null && kodePromo.isNotEmpty) 'kode_promo': kodePromo,
       },
-      options: Options(headers: headers),
     );
-    return response.data;
+    return response.data as Map<String, dynamic>;
   }
 
-  // GET /api/reservasi/my — dipakai untuk MyBookingScreen (semua status)
+  // GET /api/reservasi/my - Pemesanan milik member aktif
+  Future<List<Reservation>> getMyReservations() async {
+    final response = await _apiClient.get(ApiConstants.myReservations);
+    final responseData = response.data as Map<String, dynamic>;
+    final list = responseData['data'] as List<dynamic>? ?? [];
+    return list.map((item) => Reservation.fromJson(item as Map<String, dynamic>)).toList();
+  }
+
+  // Kompatibilitas untuk kode lama yang membaca raw Map
   Future<List<dynamic>> getUserReservations() async {
-    final headers = await _authHeader();
-    final response = await _dio.get('/reservasi/my', options: Options(headers: headers));
-    return response.data['data'] ?? [];
+    final response = await _apiClient.get(ApiConstants.myReservations);
+    final responseData = response.data as Map<String, dynamic>;
+    return (responseData['data'] as List<dynamic>?) ?? [];
   }
 
-  // GET /api/reservasi/my/history?month=&year=
+  // GET /api/reservasi/my/history - Histori bulanan
   Future<Map<String, dynamic>> getReservationHistory({int? month, int? year}) async {
-    final headers = await _authHeader();
-    final response = await _dio.get(
-      '/reservasi/my/history',
+    final response = await _apiClient.get(
+      ApiConstants.myHistory,
       queryParameters: {
-        if (month != null) 'month': month,
-        if (year != null) 'year': year,
+        'month': ?month,
+        'year': ?year,
       },
-      options: Options(headers: headers),
     );
-    return response.data['data'] ?? {};
+    final responseData = response.data as Map<String, dynamic>;
+    return (responseData['data'] as Map<String, dynamic>?) ?? {};
   }
 
-  // GET /api/reservasi/{id}/e-ticket
-  Future<Map<String, dynamic>> getETicket(int reservationId) async {
-    final headers = await _authHeader();
-    final response = await _dio.get('/reservasi/$reservationId/e-ticket', options: Options(headers: headers));
-    return response.data['data'] ?? {};
+  // GET /api/reservasi/{id}/e-ticket - Ambil e-ticket digital
+  Future<ETicket> getETicket(int reservationId) async {
+    final response = await _apiClient.get(ApiConstants.reservationETicket(reservationId));
+    final responseData = response.data as Map<String, dynamic>;
+    final data = (responseData['data'] as Map<String, dynamic>?) ?? {};
+    return ETicket.fromJson(data);
   }
 
-  // PATCH /api/reservasi/{id}/cancel
+  // PATCH /api/reservasi/{id}/cancel - Batalkan reservasi member
   Future<Map<String, dynamic>> cancelReservation(int reservationId) async {
-    final headers = await _authHeader();
-    final response = await _dio.patch('/reservasi/$reservationId/cancel', options: Options(headers: headers));
-    return response.data;
+    final response = await _apiClient.patch(ApiConstants.cancelReservation(reservationId));
+    return response.data as Map<String, dynamic>;
   }
 
-    // ============ ADMIN RESERVASI METHODS ============
+  // ============ ADMIN RESERVASI METHODS ============
 
-  // PATCH /api/admin/reservasi/{id}/status
+  // GET /api/admin/reservasi - Daftar semua reservasi untuk admin
+  Future<List<dynamic>> getAdminReservations({
+    int? month,
+    int? year,
+    String? status,
+    int? idSpace,
+    String? tanggal,
+  }) async {
+    final response = await _apiClient.get(
+      ApiConstants.adminReservations,
+      queryParameters: {
+        'month': ?month,
+        'year': ?year,
+        if (status != null && status.isNotEmpty) 'status': status,
+        'id_space': ?idSpace,
+        if (tanggal != null && tanggal.isNotEmpty) 'tanggal': tanggal,
+      },
+    );
+    final responseData = response.data as Map<String, dynamic>;
+    return (responseData['data'] as List<dynamic>?) ?? [];
+  }
+
+  // PATCH /api/admin/reservasi/{id}/status - Konfirmasi status oleh Admin
   Future<Map<String, dynamic>> updateReservationStatus(int id, String status) async {
-    final headers = await _authHeader();
-    final response = await _dio.patch(
-      '/admin/reservasi/$id/status',
+    final response = await _apiClient.patch(
+      ApiConstants.adminUpdateReservationStatus(id),
       data: {'status': status},
-      options: Options(headers: headers),
     );
-    return response.data;
+    return response.data as Map<String, dynamic>;
   }
 
-  // POST /api/admin/reservasi/{id}/check-in
+  // POST /api/admin/reservasi/{id}/check-in - Check in tamu
   Future<Map<String, dynamic>> checkInReservation(int id) async {
-    final headers = await _authHeader();
-    final response = await _dio.post(
-      '/admin/reservasi/$id/check-in',
-      options: Options(headers: headers),
-    );
-    return response.data;
+    final response = await _apiClient.post(ApiConstants.adminCheckIn(id));
+    return response.data as Map<String, dynamic>;
   }
 
-  // POST /api/admin/reservasi/{id}/check-out
+  // POST /api/admin/reservasi/{id}/check-out - Check out tamu
   Future<Map<String, dynamic>> checkOutReservation(int id) async {
-    final headers = await _authHeader();
-    final response = await _dio.post(
-      '/admin/reservasi/$id/check-out',
-      options: Options(headers: headers),
-    );
-    return response.data;
+    final response = await _apiClient.post(ApiConstants.adminCheckOut(id));
+    return response.data as Map<String, dynamic>;
   }
-
-  
-  
 }

@@ -1,45 +1,72 @@
 import 'package:flutter/material.dart';
-import 'package:coworkingspace/services/reservation_service.dart';
+import '../../core/network/api_exception.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/utils/currency_formatter.dart';
+import '../../core/utils/reservation_helper.dart';
+import '../../services/reservation_service.dart';
+import '../../widgets/app_button.dart';
+import '../../widgets/empty_state_widget.dart';
+import '../../widgets/loading_widget.dart';
+import '../../widgets/reservation_card.dart';
+import '../../widgets/status_badge.dart';
+import '../../widgets/stitch_app_bar.dart';
+import 'e_ticket_screen.dart';
 
 class MyBookingScreen extends StatefulWidget {
   const MyBookingScreen({super.key});
 
   @override
-  State<MyBookingScreen> createState() => _MyBookingScreenState();
+  State<MyBookingScreen> createState() => MyBookingScreenState();
 }
 
-class _MyBookingScreenState extends State<MyBookingScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class MyBookingScreenState extends State<MyBookingScreen> {
+  final ReservationService _reservationService = ReservationService();
+
   bool _isLoading = true;
+  String? _errorMessage;
   List<dynamic> _reservations = [];
-  String _errorMessage = '';
+  String _selectedStatus = 'Semua';
+
+  final List<String> _statusFilters = [
+    'Semua',
+    'Belum Dikonfirmasi',
+    'Disetujui',
+    'Aktif',
+    'Selesai',
+    'Dibatalkan',
+  ];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
     _fetchReservations();
   }
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+  void refresh() {
+    _fetchReservations();
   }
 
   Future<void> _fetchReservations() async {
     setState(() {
       _isLoading = true;
-      _errorMessage = '';
+      _errorMessage = null;
     });
+
     try {
-      final data = await ReservationService().getUserReservations();
+      final data = await _reservationService.getUserReservations();
+      if (!mounted) return;
       setState(() {
         _reservations = data;
         _isLoading = false;
       });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = e.message;
+        _isLoading = false;
+      });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = e.toString();
         _isLoading = false;
@@ -47,252 +74,274 @@ class _MyBookingScreenState extends State<MyBookingScreen>
     }
   }
 
-  // Status ASLI dari API: belum_dikonfirm, disetujui, aktif, selesai, dibatalkan
-  List<dynamic> _filterReservations(String tab) {
-    if (tab == 'active') {
-      return _reservations.where((r) {
-        final st = (r['status'] ?? '').toString();
-        return st == 'belum_dikonfirm' || st == 'disetujui' || st == 'aktif';
-      }).toList();
-    } else if (tab == 'completed') {
-      return _reservations.where((r) => (r['status'] ?? '') == 'selesai').toList();
-    } else {
-      return _reservations.where((r) => (r['status'] ?? '') == 'dibatalkan').toList();
-    }
+  List<dynamic> get _filteredReservations {
+    if (_selectedStatus == 'Semua') return _reservations;
+
+    return _reservations.where((r) {
+      final st = (r['status'] ?? '').toString().toLowerCase();
+      switch (_selectedStatus) {
+        case 'Belum Dikonfirmasi':
+          return st == 'belum_dikonfirm';
+        case 'Disetujui':
+          return st == 'disetujui';
+        case 'Aktif':
+          return st == 'aktif';
+        case 'Selesai':
+          return st == 'selesai';
+        case 'Dibatalkan':
+          return st == 'dibatalkan';
+        default:
+          return true;
+      }
+    }).toList();
   }
 
-  String _formatRupiah(dynamic amount) {
-    final number = int.tryParse(amount.toString().replaceAll(RegExp(r'[^\d]'), '')) ?? 0;
-    return number.toString().replaceAllMapped(
-          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-          (Match m) => '${m[1]}.',
+  Future<void> _confirmAndCancel(int id) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('Batalkan Reservasi?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        content: const Text(
+          'Apakah Anda yakin ingin membatalkan reservasi ini? Tindakan ini tidak dapat dibatalkan.',
+          style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Kembali', style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              minimumSize: const Size(100, 36),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Ya, Batalkan', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await _reservationService.cancelReservation(id);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Reservasi berhasil dibatalkan'),
+            backgroundColor: AppColors.success,
+          ),
         );
-  }
-
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'disetujui':
-        return Colors.green;
-      case 'belum_dikonfirm':
-        return Colors.orange;
-      case 'aktif':
-        return Colors.blue;
-      case 'selesai':
-        return Colors.teal;
-      case 'dibatalkan':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  String _statusLabel(String status) {
-    switch (status) {
-      case 'belum_dikonfirm':
-        return 'BELUM DIKONFIRMASI';
-      case 'disetujui':
-        return 'DISETUJUI';
-      case 'aktif':
-        return 'AKTIF';
-      case 'selesai':
-        return 'SELESAI';
-      case 'dibatalkan':
-        return 'DIBATALKAN';
-      default:
-        return status.toUpperCase();
-    }
-  }
-
-  Future<void> _handleCancel(int id) async {
-    try {
-      await ReservationService().cancelReservation(id);
-      if (!mounted) return;
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Reservasi berhasil dibatalkan'), backgroundColor: Colors.green),
-      );
-      _fetchReservations();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal membatalkan: $e'), backgroundColor: Colors.redAccent),
-      );
+        _fetchReservations();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal membatalkan: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
     }
   }
 
   void _showBookingDetailModal(Map<String, dynamic> item) {
-    final int reservationId = item['id'] ?? 0;
+    int parsedId = 0;
+    if (item['id'] != null) {
+      if (item['id'] is int) {
+        parsedId = item['id'] as int;
+      } else {
+        parsedId = int.tryParse(item['id'].toString()) ?? 0;
+      }
+    }
+
+    final spaceName = ReservationHelper.extractSpaceName(item);
     final String status = (item['status'] ?? '').toString();
+    final total = ReservationHelper.extractPrice(item);
+    final code = ReservationHelper.extractBookingCode(item);
+    final formattedDate = ReservationHelper.formatDate(item['tanggal_reservasi']);
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                item['space']?['nama_space'] ?? 'Detail Reservasi',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-              const SizedBox(height: 8),
-              Text('Kode Booking: ${item['kode_booking'] ?? '-'}'),
-              Text('Tanggal: ${item['tanggal_reservasi'] ?? '-'}'),
-              Text('Jam: ${item['jam_mulai'] ?? '-'} - ${item['jam_selesai'] ?? '-'}'),
-              Text('Total Bayar: Rp ${_formatRupiah(item['total_bayar'] ?? 0)}'),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
+      backgroundColor: Colors.white,
+      builder: (modalContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        spaceName,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                    ),
+                    StatusBadge(status: status),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                const Divider(height: 1),
+                const SizedBox(height: 14),
+                _buildModalRow('Kode Booking', '#$code'),
+                _buildModalRow('Tanggal', formattedDate),
+                _buildModalRow('Waktu', '${item['jam_mulai'] ?? '-'} (${item['durasi_jam'] ?? 1} Jam)'),
+                _buildModalRow('Total Bayar', CurrencyFormatter.formatRupiah(total)),
+                const SizedBox(height: 20),
+
+                // Tombol Lihat E-Ticket (Fungsional, tidak dead code)
+                AppButton(
+                  text: 'Lihat E-Tiket',
+                  icon: Icons.qr_code,
                   onPressed: () {
-                    Navigator.pop(context);
-                    // TODO: navigasi ke halaman E-Ticket, panggil
-                    // ReservationService().getETicket(reservationId)
+                    Navigator.pop(modalContext);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ETicketScreen(reservationId: parsedId),
+                      ),
+                    );
                   },
-                  icon: const Icon(Icons.qr_code),
-                  label: const Text('Lihat E-Ticket'),
                 ),
-              ),
-              if (status == 'belum_dikonfirm') ...[
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () => _handleCancel(reservationId),
-                    icon: const Icon(Icons.cancel, color: Colors.red),
-                    label: const Text('Batalkan Reservasi', style: TextStyle(color: Colors.red)),
+
+                if (status == 'belum_dikonfirm') ...[
+                  const SizedBox(height: 10),
+                  AppButton(
+                    text: 'Batalkan Reservasi',
+                    variant: AppButtonVariant.outline,
+                    onPressed: () {
+                      Navigator.pop(modalContext);
+                      _confirmAndCancel(parsedId);
+                    },
                   ),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
         );
       },
     );
   }
 
+  Widget _buildModalRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.textPrimary)),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: const Text('Reservasi Saya',
-            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 18)),
-        centerTitle: true,
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: const Color(0xFF2563EB),
-          unselectedLabelColor: const Color(0xFF64748B),
-          indicatorColor: const Color(0xFF2563EB),
-          tabs: const [Tab(text: 'Aktif'), Tab(text: 'Selesai'), Tab(text: 'Batal')],
-        ),
+      backgroundColor: AppColors.canvas,
+      appBar: StitchAppBar(
+        title: 'Status Pemesanan',
+        subtitle: 'Lacak Reservasi & Jadwal Sewa',
+        showBackButton: false,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, size: 18),
+            onPressed: _fetchReservations,
+          ),
+        ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _errorMessage.isNotEmpty
-              ? _buildErrorWidget()
-              : TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildBookingList(_filterReservations('active')),
-                    _buildBookingList(_filterReservations('completed')),
-                    _buildBookingList(_filterReservations('cancelled')),
-                  ],
-                ),
-    );
-  }
-
-  Widget _buildErrorWidget() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
+      body: SafeArea(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.error_outline, size: 60, color: Colors.redAccent),
-            const SizedBox(height: 12),
-            Text('Gagal memuat data\n$_errorMessage', textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            ElevatedButton(onPressed: _fetchReservations, child: const Text('Coba Lagi')),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBookingList(List<dynamic> list) {
-    if (list.isEmpty) {
-      return const Center(child: Text('Tidak ada data reservasi'));
-    }
-    return RefreshIndicator(
-      onRefresh: _fetchReservations,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: list.length,
-        itemBuilder: (context, index) {
-          final item = list[index];
-          final space = item['space'] ?? {};
-          final status = (item['status'] ?? '').toString();
-          final statusColor = _getStatusColor(status);
-
-          return InkWell(
-            onTap: () => _showBookingDetailModal(item),
-            borderRadius: BorderRadius.circular(16),
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(space['nama_space'] ?? 'Space',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            // Status Filter Chips (Stitch Design)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+              child: SizedBox(
+                height: 32,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _statusFilters.length,
+                  separatorBuilder: (context, index) => const SizedBox(width: 6),
+                  itemBuilder: (context, idx) {
+                    final f = _statusFilters[idx];
+                    final isSel = _selectedStatus == f;
+                    return InkWell(
+                      onTap: () => setState(() => _selectedStatus = f),
+                      borderRadius: BorderRadius.circular(999),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                         decoration: BoxDecoration(
-                          color: statusColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(20),
+                          color: isSel ? AppColors.primary : Colors.white,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: isSel ? AppColors.primary : AppColors.border,
+                            width: 0.8,
+                          ),
                         ),
-                        child: Text(_statusLabel(status),
-                            style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 11)),
+                        child: Text(
+                          f,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isSel ? Colors.white : AppColors.textSecondary,
+                            fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
+                          ),
+                        ),
                       ),
-                    ],
-                  ),
-                  const Divider(height: 20),
-                  Text('Tanggal: ${item['tanggal_reservasi'] ?? '-'}'),
-                  const SizedBox(height: 4),
-                  Text('Jam: ${item['jam_mulai'] ?? '-'} (${item['durasi_jam'] ?? 1} Jam)'),
-                  const Divider(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Total Bayar', style: TextStyle(color: Color(0xFF64748B))),
-                      Text('Rp ${_formatRupiah(item['total_bayar'] ?? 0)}',
-                          style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFF97316))),
-                    ],
-                  ),
-                ],
+                    );
+                  },
+                ),
               ),
             ),
-          );
-        },
+
+            // Booking List
+            Expanded(
+              child: _isLoading
+                  ? const LoadingWidget(message: 'Memuat data reservasi...')
+                  : _errorMessage != null
+                      ? EmptyStateWidget(
+                          icon: Icons.error_outline,
+                          title: 'Gagal Memuat Data',
+                          message: _errorMessage!,
+                          actionLabel: 'Coba Lagi',
+                          onAction: _fetchReservations,
+                        )
+                      : _filteredReservations.isEmpty
+                          ? EmptyStateWidget(
+                              icon: Icons.calendar_today_outlined,
+                              title: 'Tidak Ada Data Reservasi',
+                              message: 'Tidak ada pemesanan space dengan status "$_selectedStatus".',
+                            )
+                          : RefreshIndicator(
+                              onRefresh: _fetchReservations,
+                              color: AppColors.primary,
+                              child: ListView.separated(
+                                padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+                                itemCount: _filteredReservations.length,
+                                separatorBuilder: (context, index) => const SizedBox(height: 10),
+                                itemBuilder: (context, index) {
+                                  final item = _filteredReservations[index] as Map<String, dynamic>;
+                                  return ReservationCard(
+                                    item: item,
+                                    onTap: () => _showBookingDetailModal(item),
+                                  );
+                                },
+                              ),
+                            ),
+            ),
+          ],
+        ),
       ),
     );
   }
