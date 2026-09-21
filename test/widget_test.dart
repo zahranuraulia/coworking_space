@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:coworkingspace/core/utils/currency_formatter.dart';
+import 'package:coworkingspace/core/utils/image_helper.dart';
 import 'package:coworkingspace/core/utils/reservation_helper.dart';
 import 'package:coworkingspace/main.dart';
 import 'package:coworkingspace/models/discount.dart';
@@ -13,6 +14,40 @@ void main() {
     expect(CurrencyFormatter.formatRupiah('50000'), 'Rp 50.000');
     expect(CurrencyFormatter.formatRupiah(0), 'Rp 0');
     expect(CurrencyFormatter.formatRupiah(null), 'Rp 0');
+  });
+
+  test('ImageHelper normalizes reverse-proxy and insecure URLs properly', () {
+    const rawBackendUrl = 'http://learn.smktelkom-mlg.sch.id/uploads/spaces/1789992032651.jpg';
+    final normalized = ImageHelper.normalizeUrl(rawBackendUrl);
+    expect(normalized, 'https://learn.smktelkom-mlg.sch.id/coworking/uploads/spaces/1789992032651.jpg');
+
+    const bareFilename = 'my_image.png';
+    final bareNormalized = ImageHelper.normalizeUrl(bareFilename, folder: 'members');
+    expect(bareNormalized, 'https://learn.smktelkom-mlg.sch.id/coworking/uploads/members/my_image.png');
+
+    const localhostUrl = 'http://localhost:3000/uploads/spaces/test.jpg';
+    final localhostNormalized = ImageHelper.normalizeUrl(localhostUrl);
+    expect(localhostNormalized, 'https://learn.smktelkom-mlg.sch.id/coworking/uploads/spaces/test.jpg');
+  });
+
+  test('Discount model parses nested diskon object from POST /api/diskon/check', () {
+    final nestedCheckResponse = {
+      'valid': true,
+      'diskon': {
+        'id': 195,
+        'nama_diskon': 'AYACANTIK',
+        'persentase_diskon': 50,
+        'tanggal_awal': '2026-09-21T00:00:00.000Z',
+        'tanggal_akhir': '2026-10-24T23:59:59.000Z',
+      },
+      'message': 'Kode promo valid! Diskon 50% berhasil diterapkan.',
+    };
+
+    final d = Discount.fromJson(nestedCheckResponse);
+    expect(d.id, 195);
+    expect(d.namaDiskon, 'AYACANTIK');
+    expect(d.persentase, 50.0);
+    expect(d.aktif, true);
   });
 
   test('ReservationHelper extracts price and space from real API detail_reservasi structure', () {

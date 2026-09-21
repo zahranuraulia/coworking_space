@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import '../core/constants/api_constants.dart';
 import '../core/network/api_client.dart';
 import '../models/member.dart';
@@ -29,10 +30,21 @@ class MemberService {
     required String alamat,
     required String telp,
     String? foto,
+    String? localFilePath,
   }) async {
-    final response = await _apiClient.post(
-      ApiConstants.adminMembers,
-      data: {
+    dynamic requestData;
+    if (localFilePath != null && localFilePath.isNotEmpty) {
+      requestData = FormData.fromMap({
+        'username': username,
+        'password': password,
+        'nama_member': namaMember,
+        'instansi': instansi,
+        'alamat': alamat,
+        'telp': telp,
+        'foto': await MultipartFile.fromFile(localFilePath),
+      });
+    } else {
+      requestData = {
         'username': username,
         'password': password,
         'nama_member': namaMember,
@@ -40,7 +52,12 @@ class MemberService {
         'alamat': alamat,
         'telp': telp,
         if (foto != null && foto.isNotEmpty) 'foto': foto,
-      },
+      };
+    }
+
+    final response = await _apiClient.post(
+      ApiConstants.adminMembers,
+      data: requestData,
     );
     return Member.fromJson(response.data['data'] as Map<String, dynamic>);
   }
@@ -53,17 +70,32 @@ class MemberService {
     String? telp,
     String? password,
     String? foto,
+    String? localFilePath,
   }) async {
-    final response = await _apiClient.put(
-      ApiConstants.adminMemberDetail(id),
-      data: <String, dynamic>{
+    dynamic requestData;
+    if (localFilePath != null && localFilePath.isNotEmpty) {
+      requestData = FormData.fromMap({
+        'nama_member': ?namaMember,
+        'instansi': ?instansi,
+        'alamat': ?alamat,
+        'telp': ?telp,
+        if (password != null && password.isNotEmpty) 'password': password,
+        'foto': await MultipartFile.fromFile(localFilePath),
+      });
+    } else {
+      requestData = <String, dynamic>{
         'nama_member': ?namaMember,
         'instansi': ?instansi,
         'alamat': ?alamat,
         'telp': ?telp,
         if (password != null && password.isNotEmpty) 'password': password,
         if (foto != null && foto.isNotEmpty) 'foto': foto,
-      },
+      };
+    }
+
+    final response = await _apiClient.put(
+      ApiConstants.adminMemberDetail(id),
+      data: requestData,
     );
     return Member.fromJson(response.data['data'] as Map<String, dynamic>);
   }

@@ -1,3 +1,5 @@
+import '../core/utils/image_helper.dart';
+
 class Space {
   final int id;
   final String namaSpace;
@@ -58,14 +60,18 @@ class Space {
         ? json['owner']['nama_coworking'] as String?
         : null;
 
+    final rawFoto = json['foto']?.toString();
+    final rawFotoUrl = json['foto_url']?.toString();
+    final resolvedUrl = ImageHelper.normalizeUrl(rawFotoUrl ?? rawFoto, folder: 'spaces');
+
     return Space(
       id: json['id'] is int ? json['id'] as int : int.tryParse(json['id']?.toString() ?? '0') ?? 0,
       namaSpace: (json['nama_space'] ?? json['name'] ?? 'Space').toString(),
       tipe: (json['tipe'] ?? json['tipe_space'] ?? 'desk').toString(),
       kapasitas: parsedKapasitas,
       hargaPerJam: parsedHarga,
-      foto: json['foto']?.toString(),
-      fotoUrl: json['foto_url']?.toString(),
+      foto: rawFoto,
+      fotoUrl: resolvedUrl,
       deskripsi: json['deskripsi']?.toString(),
       lokasi: ownerName ?? json['location']?.toString() ?? 'Coworking Space',
     );

@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import '../core/constants/api_constants.dart';
 import '../core/network/api_client.dart';
 import '../models/admin_profile.dart';
@@ -48,17 +49,33 @@ class AdminService {
     required int kapasitas,
     required String deskripsi,
     String? foto,
+    String? localFilePath,
   }) async {
-    final response = await _apiClient.post(
-      ApiConstants.adminSpaces,
-      data: {
+    dynamic requestData;
+
+    if (localFilePath != null && localFilePath.isNotEmpty) {
+      requestData = FormData.fromMap({
+        'nama_space': namaSpace,
+        'harga_per_jam': hargaPerJam,
+        'tipe': tipe,
+        'kapasitas': kapasitas,
+        'deskripsi': deskripsi,
+        'foto': await MultipartFile.fromFile(localFilePath),
+      });
+    } else {
+      requestData = {
         'nama_space': namaSpace,
         'harga_per_jam': hargaPerJam,
         'tipe': tipe,
         'kapasitas': kapasitas,
         'deskripsi': deskripsi,
         if (foto != null && foto.isNotEmpty) 'foto': foto,
-      },
+      };
+    }
+
+    final response = await _apiClient.post(
+      ApiConstants.adminSpaces,
+      data: requestData,
     );
     return Space.fromJson(response.data['data'] as Map<String, dynamic>);
   }
@@ -71,17 +88,33 @@ class AdminService {
     required int kapasitas,
     required String deskripsi,
     String? foto,
+    String? localFilePath,
   }) async {
-    final response = await _apiClient.put(
-      ApiConstants.adminSpaceDetail(id),
-      data: {
+    dynamic requestData;
+
+    if (localFilePath != null && localFilePath.isNotEmpty) {
+      requestData = FormData.fromMap({
+        'nama_space': namaSpace,
+        'harga_per_jam': hargaPerJam,
+        'tipe': tipe,
+        'kapasitas': kapasitas,
+        'deskripsi': deskripsi,
+        'foto': await MultipartFile.fromFile(localFilePath),
+      });
+    } else {
+      requestData = {
         'nama_space': namaSpace,
         'harga_per_jam': hargaPerJam,
         'tipe': tipe,
         'kapasitas': kapasitas,
         'deskripsi': deskripsi,
         if (foto != null && foto.isNotEmpty) 'foto': foto,
-      },
+      };
+    }
+
+    final response = await _apiClient.put(
+      ApiConstants.adminSpaceDetail(id),
+      data: requestData,
     );
     return Space.fromJson(response.data['data'] as Map<String, dynamic>);
   }

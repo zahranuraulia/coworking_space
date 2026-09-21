@@ -447,7 +447,7 @@ class _AdminMemberScreenState extends State<AdminMemberScreen> {
       ),
       child: Row(
         children: [
-          // Avatar (Stitch soft gray circle)
+          // Avatar (Stitch soft gray circle with image support)
           Container(
             width: 44,
             height: 44,
@@ -456,10 +456,24 @@ class _AdminMemberScreenState extends State<AdminMemberScreen> {
               shape: BoxShape.circle,
               border: Border.all(color: AppColors.border, width: 0.8),
             ),
-            child: const Icon(
-              Icons.person,
-              color: AppColors.textSecondary,
-              size: 24,
+            child: ClipOval(
+              child: member.fotoUrl != null && member.fotoUrl!.isNotEmpty
+                  ? Image.network(
+                      member.fotoUrl!,
+                      width: 44,
+                      height: 44,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => const Icon(
+                        Icons.person,
+                        color: AppColors.textSecondary,
+                        size: 24,
+                      ),
+                    )
+                  : const Icon(
+                      Icons.person,
+                      color: AppColors.textSecondary,
+                      size: 24,
+                    ),
             ),
           ),
           const SizedBox(width: 12),

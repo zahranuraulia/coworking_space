@@ -137,6 +137,7 @@ class _AdminSpaceFormScreenState extends State<AdminSpaceFormScreen> {
           tipe: _selectedType,
           kapasitas: kapasitas,
           deskripsi: finalDeskripsi,
+          localFilePath: _localPhotoPath,
           foto: _uploadedPhoto,
         );
       } else {
@@ -147,6 +148,7 @@ class _AdminSpaceFormScreenState extends State<AdminSpaceFormScreen> {
           tipe: _selectedType,
           kapasitas: kapasitas,
           deskripsi: finalDeskripsi,
+          localFilePath: _localPhotoPath,
           foto: _uploadedPhoto,
         );
       }

@@ -41,6 +41,8 @@ class _BookingScreenState extends State<BookingScreen> {
   List<Discount> _activeDiscounts = [];
   Discount? _appliedDiscount;
   String? _promoFeedback;
+  String? _verifiedPromoCode;
+  int _promoRequestId = 0;
 
   @override
   void initState() {
@@ -56,7 +58,30 @@ class _BookingScreenState extends State<BookingScreen> {
       _selectedTime = TimeOfDay(hour: now.hour + 1, minute: 0);
     }
 
+    _promoController.addListener(_onPromoEdited);
     _loadActiveDiscounts();
+  }
+
+  @override
+  void dispose() {
+    _promoController.removeListener(_onPromoEdited);
+    _promoController.dispose();
+    super.dispose();
+  }
+
+  String _promoText = '';
+
+  void _onPromoEdited() {
+    final text = _promoController.text;
+    if (text == _promoText) return;
+    _promoText = text;
+    setState(() {
+      _promoRequestId++;
+      _appliedDiscount = null;
+      _verifiedPromoCode = null;
+      _promoFeedback = null;
+      _isCheckingPromo = false;
+    });
   }
 
   Future<void> _loadActiveDiscounts() async {
@@ -75,11 +100,15 @@ class _BookingScreenState extends State<BookingScreen> {
   double get _totalPrice => (_subtotal - _discountAmount).clamp(0.0, double.infinity);
 
   Future<void> _applyPromoCode(String code) async {
-    final cleanCode = code.trim();
+    final cleanCode = code.trim().toUpperCase();
+    final requestId = ++_promoRequestId;
+
     if (cleanCode.isEmpty) {
       setState(() {
         _appliedDiscount = null;
+        _verifiedPromoCode = null;
         _promoFeedback = null;
+        _isCheckingPromo = false;
       });
       return;
     }
@@ -87,16 +116,28 @@ class _BookingScreenState extends State<BookingScreen> {
     setState(() => _isCheckingPromo = true);
     try {
       final discount = await _discountService.checkDiscount(cleanCode);
-      if (!mounted) return;
+      if (!mounted || requestId != _promoRequestId) return;
       setState(() {
         _appliedDiscount = discount;
-        _promoFeedback = 'Diskon ${discount.persentase.toInt()}% berhasil diterapkan';
+        _verifiedPromoCode = discount.namaDiskon.toUpperCase();
+        _promoText = discount.namaDiskon;
+        _promoController.text = discount.namaDiskon;
+        _promoFeedback = 'Diskon ${discount.persentase.toInt()}% berhasil diterapkan!';
+        _isCheckingPromo = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted || requestId != _promoRequestId) return;
+      setState(() {
+        _appliedDiscount = null;
+        _verifiedPromoCode = null;
+        _promoFeedback = e.message;
         _isCheckingPromo = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || requestId != _promoRequestId) return;
       setState(() {
         _appliedDiscount = null;
+        _verifiedPromoCode = null;
         _promoFeedback = 'Kode promo tidak valid atau telah kedaluwarsa';
         _isCheckingPromo = false;
       });
@@ -152,6 +193,8 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   Future<void> _handleBooking() async {
+    if (_isLoading || _isCheckingPromo) return;
+
     final now = DateTime.now();
     final isToday = _selectedDate.year == now.year &&
         _selectedDate.month == now.month &&
@@ -212,15 +255,47 @@ class _BookingScreenState extends State<BookingScreen> {
         // If availability check fails or backend has mock rule, proceed
       }
 
-      final promo = _promoController.text.trim();
+      // Sync promo code if user typed something but hasn't pressed Terapkan
+      final typedCode = _promoController.text.trim().toUpperCase();
+      if (typedCode.isNotEmpty) {
+        if (_appliedDiscount == null || _verifiedPromoCode != typedCode) {
+          try {
+            final d = await _discountService.checkDiscount(typedCode);
+            _appliedDiscount = d;
+            _verifiedPromoCode = d.namaDiskon.toUpperCase();
+          } catch (e) {
+            if (!mounted) return;
+            setState(() => _isLoading = false);
+            final message = e is ApiException
+                ? e.message
+                : 'Kode promo "$typedCode" tidak valid atau telah kedaluwarsa.';
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message),
+                backgroundColor: AppColors.error,
+              ),
+            );
+            return;
+          }
+        }
+      } else {
+        _appliedDiscount = null;
+        _verifiedPromoCode = null;
+      }
+
+      final verifiedDiscount = (_appliedDiscount != null &&
+              _verifiedPromoCode != null &&
+              _appliedDiscount!.namaDiskon.toUpperCase() == _verifiedPromoCode)
+          ? _appliedDiscount
+          : null;
 
       await _reservationService.createReservation(
         idSpace: _space.id,
         tanggalReservasi: formattedDate,
         jamMulai: formattedTime,
         durasiJam: _durationHours,
-        idDiskon: _appliedDiscount?.id,
-        kodePromo: promo.isNotEmpty ? promo : null,
+        idDiskon: verifiedDiscount?.id,
+        kodePromo: verifiedDiscount?.namaDiskon,
       );
 
       if (!mounted) return;
@@ -521,18 +596,18 @@ class _BookingScreenState extends State<BookingScreen> {
                           border: Border.all(color: AppColors.border),
                         ),
                         child: DropdownButtonHideUnderline(
-                          child: DropdownButton<Discount?>(
+                          child: DropdownButton<int?>(
                             isExpanded: true,
                             hint: const Text('Pilih voucher diskon aktif...', style: TextStyle(fontSize: 13)),
-                            value: _appliedDiscount,
+                            value: _appliedDiscount?.id,
                             items: [
-                              const DropdownMenuItem<Discount?>(
+                              const DropdownMenuItem<int?>(
                                 value: null,
                                 child: Text('Tanpa Diskon', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
                               ),
                               ..._activeDiscounts.map((d) {
-                                return DropdownMenuItem<Discount?>(
-                                  value: d,
+                                return DropdownMenuItem<int?>(
+                                  value: d.id,
                                   child: Text(
                                     '${d.namaDiskon} - ${d.persentase.toInt()}%',
                                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
@@ -540,13 +615,26 @@ class _BookingScreenState extends State<BookingScreen> {
                                 );
                               }),
                             ],
-                            onChanged: (val) {
+                            onChanged: (selectedId) {
                               setState(() {
-                                _appliedDiscount = val;
-                                if (val != null) {
-                                  _promoController.text = val.namaDiskon;
-                                  _promoFeedback = 'Diskon ${val.persentase.toInt()}% berhasil dipilih';
+                                _promoRequestId++;
+                                _isCheckingPromo = false;
+                                if (selectedId != null) {
+                                  final match = _activeDiscounts.cast<Discount?>().firstWhere(
+                                        (d) => d?.id == selectedId,
+                                        orElse: () => null,
+                                      );
+                                  _appliedDiscount = match;
+                                  _verifiedPromoCode = match?.namaDiskon.toUpperCase();
+                                  _promoText = match?.namaDiskon ?? '';
+                                  _promoController.text = match?.namaDiskon ?? '';
+                                  _promoFeedback = match != null
+                                      ? 'Diskon ${match.persentase.toInt()}% berhasil dipilih'
+                                      : null;
                                 } else {
+                                  _appliedDiscount = null;
+                                  _verifiedPromoCode = null;
+                                  _promoText = '';
                                   _promoController.clear();
                                   _promoFeedback = null;
                                 }
@@ -715,7 +803,7 @@ class _BookingScreenState extends State<BookingScreen> {
               child: AppButton(
                 text: 'Konfirmasi Reservasi',
                 isLoading: _isLoading,
-                onPressed: _handleBooking,
+                onPressed: (_isLoading || _isCheckingPromo) ? null : _handleBooking,
               ),
             ),
           ],
