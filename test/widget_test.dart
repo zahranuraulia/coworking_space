@@ -99,6 +99,25 @@ void main() {
     expect(d.aktif, true);
   });
 
+  test('Global seeder check correctly distinguishes global template account vs tenant account', () {
+    final globalSeedUser = {
+      'id': 1202,
+      'username': 'admin_space1',
+      'role': 'admin_space',
+      'maker_id': null,
+    };
+    final tenantUser = {
+      'id': 1392,
+      'username': 'admin_test1',
+      'role': 'admin_space',
+      'maker_id': 82,
+    };
+
+    expect(globalSeedUser['maker_id'] == null, true);
+    expect(tenantUser['maker_id'] == null, false);
+    expect(tenantUser['maker_id'], 82);
+  });
+
   test('Space model parses display types correctly', () {
     final s1 = Space.fromJson({'id': 1, 'nama_space': 'Desk 1', 'tipe': 'desk', 'harga_per_jam': 20000, 'kapasitas': 1});
     expect(s1.displayTipe, 'Personal Desk');

@@ -54,6 +54,54 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _isLoading = false);
 
       final String role = (responseData['role'] ?? 'member').toString();
+      final bool isGlobalSeed = responseData['is_global_seed'] == true;
+
+      // Peringatan jika login dengan akun seeder global panitia (maker_id: null)
+      if (isGlobalSeed && (role == 'admin_space' || role == 'admin')) {
+        final proceed = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: const [
+                Icon(Icons.info_outline, color: AppColors.secondary, size: 22),
+                SizedBox(width: 8),
+                Text('Akun Global Panitia', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            content: const Text(
+              'Anda masuk menggunakan akun template bawaan panitia (admin_space1 / Moklet Hub Coworking).\n\n'
+              'Akun ini terpisah dari tenant App Maker Anda, sehingga ruangan dan transaksi milik coworking space Anda tidak akan muncul pada akun ini.\n\n'
+              'Tetap lanjutkan ke dashboard akun panitia?',
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.4),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Batal & Ganti Akun', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  minimumSize: const Size(88, 36),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Lanjutkan', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+
+        if (proceed != true) {
+          await _authService.logout();
+          return;
+        }
+      }
+
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

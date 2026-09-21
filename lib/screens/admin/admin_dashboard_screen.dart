@@ -22,6 +22,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final ReservationService _reservationService = ReservationService();
 
   bool _isLoading = true;
+  bool _isGlobalSeed = false;
   String? _errorMessage;
   List<dynamic> _reservations = [];
 
@@ -38,9 +39,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     });
 
     try {
+      final session = await _authService.checkSession();
       final list = await _reservationService.getAdminReservations();
       if (!mounted) return;
       setState(() {
+        _isGlobalSeed = session['is_global_seed'] == true;
         _reservations = list;
         _isLoading = false;
       });
@@ -145,6 +148,39 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (_isGlobalSeed)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFFBEB),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFFDE68A)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.info_outline, size: 18, color: Color(0xFFD97706)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: const [
+                              Text(
+                                'Mode Akun Template Panitia',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'Anda login dengan akun global (admin_space1). Data space dan transaksi tenant App Maker Anda terpisah dari akun ini. Untuk mengelola space Anda sendiri, masuk dengan akun admin tenant Anda.',
+                                style: TextStyle(fontSize: 11, color: Color(0xFFB45309), height: 1.35),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 const Text(
                   'Ringkasan Reservasi',
                   style: TextStyle(

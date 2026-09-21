@@ -21,6 +21,7 @@ class AuthService {
 
       String token = '';
       String role = 'member';
+      int? makerId;
 
       if (data is Map<String, dynamic>) {
         token = data['token'] ??
@@ -29,14 +30,21 @@ class AuthService {
             data['data']?['token'] ??
             '';
 
-        if (data['data'] != null && data['data']['role'] != null) {
-          role = data['data']['role'].toString();
-        } else if (data['user'] != null && data['user']['role'] != null) {
-          role = data['user']['role'].toString();
-        } else if (data['data'] != null && data['data']['user'] != null) {
-          role = (data['data']['user']['role'] ?? 'member').toString();
+        final userMap = (data['data'] is Map<String, dynamic>)
+            ? data['data'] as Map<String, dynamic>
+            : (data['user'] is Map<String, dynamic>
+                ? data['user'] as Map<String, dynamic>
+                : data);
+
+        if (userMap['role'] != null) {
+          role = userMap['role'].toString();
         } else if (data['role'] != null) {
           role = data['role'].toString();
+        }
+
+        final rawMaker = userMap['maker_id'];
+        if (rawMaker != null) {
+          makerId = rawMaker is int ? rawMaker : int.tryParse(rawMaker.toString());
         }
       }
 
@@ -46,7 +54,21 @@ class AuthService {
       await prefs.setString('user_role', role);
       await prefs.setString('username', username);
 
-      return {'token': token, 'role': role, 'data': data};
+      if (makerId != null) {
+        await prefs.setInt('maker_id', makerId);
+        await prefs.setBool('is_global_seed', false);
+      } else {
+        await prefs.remove('maker_id');
+        await prefs.setBool('is_global_seed', true);
+      }
+
+      return {
+        'token': token,
+        'role': role,
+        'data': data,
+        'maker_id': makerId,
+        'is_global_seed': makerId == null,
+      };
     } on ApiException {
       rethrow;
     } catch (e) {
@@ -109,13 +131,19 @@ class AuthService {
   }
 
   // 4. Cek Sesi Login
-  Future<Map<String, String?>> checkSession() async {
+  Future<Map<String, dynamic>> checkSession() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('access_token');
     final role = prefs.getString('user_role');
     final username = prefs.getString('username');
+    final isGlobalSeed = prefs.getBool('is_global_seed') ?? false;
 
-    return {'token': token, 'role': role, 'username': username};
+    return {
+      'token': token,
+      'role': role,
+      'username': username,
+      'is_global_seed': isGlobalSeed,
+    };
   }
 
   // 5. Logout & Bersihkan Sesi
@@ -125,5 +153,7 @@ class AuthService {
     await prefs.remove('auth_token');
     await prefs.remove('user_role');
     await prefs.remove('username');
+    await prefs.remove('maker_id');
+    await prefs.remove('is_global_seed');
   }
 }
