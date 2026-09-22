@@ -171,7 +171,7 @@ class _MemberRegisterScreenState extends State<MemberRegisterScreen> {
                 const SizedBox(height: 16),
 
                 AppTextField(
-                  label: 'Instansi / Perusahaan (Opsional)',
+                  label: 'Instansi / Perusahaan',
                   hintText: 'Contoh: Universitas Indonesia / PT Maju',
                   controller: _instansiController,
                   prefixIcon: Icons.business_outlined,
@@ -179,7 +179,7 @@ class _MemberRegisterScreenState extends State<MemberRegisterScreen> {
                 const SizedBox(height: 16),
 
                 AppTextField(
-                  label: 'Alamat (Opsional)',
+                  label: 'Alamat',
                   hintText: 'Masukkan alamat tempat tinggal',
                   controller: _alamatController,
                   prefixIcon: Icons.home_outlined,
