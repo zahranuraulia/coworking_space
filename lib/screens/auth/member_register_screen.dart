@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/theme/app_colors.dart';
 import '../../services/auth_service.dart';
@@ -163,26 +164,38 @@ class _MemberRegisterScreenState extends State<MemberRegisterScreen> {
                   label: 'Nomor Telepon / HP *',
                   hintText: 'Contoh: 081234567890',
                   controller: _telpController,
-                  keyboardType: TextInputType.phone,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   prefixIcon: Icons.phone_outlined,
-                  validator: (val) =>
-                      val == null || val.trim().isEmpty ? 'Nomor telepon wajib diisi' : null,
+                  validator: (val) {
+                    if (val == null || val.trim().isEmpty) return 'Nomor telepon wajib diisi';
+                    if (!RegExp(r'^[0-9]+$').hasMatch(val.trim())) {
+                      return 'Nomor telepon hanya boleh berisi angka';
+                    }
+                    if (val.trim().length < 10) return 'Nomor telepon minimal 10 digit';
+                    if (val.trim().length > 15) return 'Nomor telepon maksimal 15 digit';
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 16),
 
                 AppTextField(
-                  label: 'Instansi / Perusahaan (Opsional)',
+                  label: 'Instansi / Perusahaan *',
                   hintText: 'Contoh: Universitas Indonesia / PT Maju',
                   controller: _instansiController,
                   prefixIcon: Icons.business_outlined,
+                  validator: (val) =>
+                      val == null || val.trim().isEmpty ? 'Instansi / perusahaan wajib diisi' : null,
                 ),
                 const SizedBox(height: 16),
 
                 AppTextField(
-                  label: 'Alamat (Opsional)',
-                  hintText: 'Masukkan alamat tempat tinggal',
+                  label: 'Alamat Lengkap *',
+                  hintText: 'Masukkan alamat domisili lengkap',
                   controller: _alamatController,
                   prefixIcon: Icons.home_outlined,
+                  validator: (val) =>
+                      val == null || val.trim().isEmpty ? 'Alamat lengkap wajib diisi' : null,
                 ),
                 const SizedBox(height: 16),
 

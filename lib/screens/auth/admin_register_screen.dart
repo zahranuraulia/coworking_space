@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/theme/app_colors.dart';
 import '../../services/auth_service.dart';
@@ -170,10 +171,18 @@ class _AdminRegisterScreenState extends State<AdminRegisterScreen> {
                   label: 'Nomor WhatsApp / Telepon *',
                   hintText: 'Contoh: 081298765432',
                   controller: _telpController,
-                  keyboardType: TextInputType.phone,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   prefixIcon: Icons.phone_outlined,
-                  validator: (val) =>
-                      val == null || val.trim().isEmpty ? 'Nomor telepon wajib diisi' : null,
+                  validator: (val) {
+                    if (val == null || val.trim().isEmpty) return 'Nomor telepon wajib diisi';
+                    if (!RegExp(r'^[0-9]+$').hasMatch(val.trim())) {
+                      return 'Nomor telepon hanya boleh berisi angka';
+                    }
+                    if (val.trim().length < 10) return 'Nomor telepon minimal 10 digit';
+                    if (val.trim().length > 15) return 'Nomor telepon maksimal 15 digit';
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 16),
 

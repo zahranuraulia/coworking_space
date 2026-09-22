@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
@@ -384,10 +385,15 @@ class _AdminSpaceFormScreenState extends State<AdminSpaceFormScreen> {
                               hintText: '1',
                               controller: _kapasitasController,
                               keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                               prefixIcon: Icons.people_outline,
-                              validator: (v) => (int.tryParse(v?.trim() ?? '') ?? 0) <= 0
-                                  ? 'Minimal 1 orang'
-                                  : null,
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) return 'Kapasitas wajib diisi';
+                                if (!RegExp(r'^[0-9]+$').hasMatch(v.trim())) return 'Hanya boleh angka';
+                                final parsed = int.tryParse(v.trim()) ?? 0;
+                                if (parsed <= 0) return 'Minimal 1 orang';
+                                return null;
+                              },
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -397,10 +403,15 @@ class _AdminSpaceFormScreenState extends State<AdminSpaceFormScreen> {
                               hintText: '25000',
                               controller: _hargaController,
                               keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                               prefixIcon: Icons.payments_outlined,
-                              validator: (v) => (double.tryParse(v?.trim() ?? '') ?? 0.0) <= 0
-                                  ? 'Tarif tidak valid'
-                                  : null,
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) return 'Tarif wajib diisi';
+                                if (!RegExp(r'^[0-9]+$').hasMatch(v.trim())) return 'Hanya boleh angka';
+                                final parsed = double.tryParse(v.trim()) ?? 0.0;
+                                if (parsed <= 0) return 'Tarif tidak valid';
+                                return null;
+                              },
                             ),
                           ),
                         ],
