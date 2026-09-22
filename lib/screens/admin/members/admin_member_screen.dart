@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../models/member.dart';
@@ -159,9 +160,18 @@ class _AdminMemberScreenState extends State<AdminMemberScreen> {
                         label: 'Nomor Telepon / WA *',
                         hintText: 'Contoh: 081234567890',
                         controller: telpCtrl,
-                        keyboardType: TextInputType.phone,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                         prefixIcon: Icons.phone_outlined,
-                        validator: (v) => v == null || v.trim().isEmpty ? 'Nomor kontak wajib diisi' : null,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return 'Nomor kontak wajib diisi';
+                          if (!RegExp(r'^[0-9]+$').hasMatch(v.trim())) {
+                            return 'Nomor kontak hanya boleh berisi angka';
+                          }
+                          if (v.trim().length < 10) return 'Nomor kontak minimal 10 digit';
+                          if (v.trim().length > 15) return 'Nomor kontak maksimal 15 digit';
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 10),
 

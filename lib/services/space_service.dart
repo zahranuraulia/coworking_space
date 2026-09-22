@@ -42,20 +42,30 @@ class SpaceService {
   Future<Map<String, dynamic>> checkAvailability({
     required int idSpace,
     required String tanggal,
-    required String jamMulai,
-    required int durasiJam,
+    String? jamMulai,
+    int? durasiJam,
   }) async {
     final response = await _apiClient.get(
       ApiConstants.spaceAvailability,
       queryParameters: {
         'id_space': idSpace,
         'tanggal': tanggal,
-        'jam_mulai': jamMulai,
-        'durasi_jam': durasiJam,
+        if (jamMulai != null && jamMulai.isNotEmpty) 'jam_mulai': jamMulai,
+        'durasi_jam': ?durasiJam,
       },
     );
 
-    final responseData = response.data as Map<String, dynamic>;
-    return (responseData['data'] as Map<String, dynamic>?) ?? {};
+    final responseData = response.data;
+    if (responseData is Map<String, dynamic>) {
+      final data = responseData['data'];
+      if (data is List && data.isNotEmpty) {
+        return (data.first is Map<String, dynamic>)
+            ? data.first as Map<String, dynamic>
+            : <String, dynamic>{};
+      } else if (data is Map<String, dynamic>) {
+        return data;
+      }
+    }
+    return {};
   }
 }

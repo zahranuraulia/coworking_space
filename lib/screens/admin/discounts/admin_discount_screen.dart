@@ -158,9 +158,12 @@ class _AdminDiscountScreenState extends State<AdminDiscountScreen> {
                         hintText: 'Contoh: 20',
                         controller: persenCtrl,
                         keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                         prefixIcon: Icons.percent_outlined,
                         validator: (v) {
-                          final num = double.tryParse(v?.trim() ?? '');
+                          if (v == null || v.trim().isEmpty) return 'Persentase diskon wajib diisi';
+                          if (!RegExp(r'^[0-9]+$').hasMatch(v.trim())) return 'Hanya boleh berisi angka';
+                          final num = int.tryParse(v.trim());
                           if (num == null || num <= 0 || num > 100) {
                             return 'Persentase harus antara 1 sampai 100';
                           }

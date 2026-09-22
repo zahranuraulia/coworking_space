@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../models/admin_profile.dart';
@@ -275,9 +276,18 @@ class _AdminProfileScreenState extends State<AdminProfileScreen> {
                               label: 'Nomor Telepon Operasional *',
                               hintText: 'Nomor kontak CS / resepsionis',
                               controller: _telpCtrl,
-                              keyboardType: TextInputType.phone,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                               prefixIcon: Icons.phone_outlined,
-                              validator: (v) => v == null || v.trim().isEmpty ? 'Nomor telepon wajib diisi' : null,
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) return 'Nomor telepon wajib diisi';
+                                if (!RegExp(r'^[0-9]+$').hasMatch(v.trim())) {
+                                  return 'Nomor telepon hanya boleh berisi angka';
+                                }
+                                if (v.trim().length < 10) return 'Nomor telepon minimal 10 digit';
+                                if (v.trim().length > 15) return 'Nomor telepon maksimal 15 digit';
+                                return null;
+                              },
                             ),
                             const SizedBox(height: 14),
 

@@ -38,6 +38,12 @@ class _BookingScreenState extends State<BookingScreen> {
   bool _isLoading = false;
   bool _isCheckingPromo = false;
 
+  bool _isCheckingAvailability = false;
+  bool _isSlotAvailable = true;
+  String? _availabilityStatusText;
+  List<Map<String, dynamic>> _bookedSlotsForSelectedDate = [];
+  int _availabilityRequestId = 0;
+
   List<Discount> _activeDiscounts = [];
   Discount? _appliedDiscount;
   String? _promoFeedback;
@@ -60,6 +66,7 @@ class _BookingScreenState extends State<BookingScreen> {
 
     _promoController.addListener(_onPromoEdited);
     _loadActiveDiscounts();
+    _checkAvailabilityRealtime();
   }
 
   @override
@@ -144,6 +151,113 @@ class _BookingScreenState extends State<BookingScreen> {
     }
   }
 
+  Future<void> _checkAvailabilityRealtime() async {
+    final requestId = ++_availabilityRequestId;
+    setState(() => _isCheckingAvailability = true);
+
+    final now = DateTime.now();
+    final isToday = _selectedDate.year == now.year &&
+        _selectedDate.month == now.month &&
+        _selectedDate.day == now.day;
+
+    final startMinutes = _selectedTime.hour * 60 + _selectedTime.minute;
+    final nowMinutes = now.hour * 60 + now.minute;
+
+    final formattedDate =
+        "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
+    final formattedTime =
+        "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}";
+
+    if (isToday && startMinutes <= nowMinutes) {
+      if (!mounted || requestId != _availabilityRequestId) return;
+      setState(() {
+        _isSlotAvailable = false;
+        _availabilityStatusText = 'Jam mulai sudah lewat untuk hari ini. Silakan pilih jam mendatang.';
+        _isCheckingAvailability = false;
+      });
+      return;
+    }
+
+    try {
+      final daySchedule = await _spaceService.checkAvailability(
+        idSpace: _space.id,
+        tanggal: formattedDate,
+      );
+
+      final List<Map<String, dynamic>> bookedSlots = [];
+      final details = (daySchedule['detail_reservasi'] as List<dynamic>?) ?? [];
+      for (final d in details) {
+        if (d is Map<String, dynamic> && d['reservasi'] is Map<String, dynamic>) {
+          final r = d['reservasi'] as Map<String, dynamic>;
+          final status = (r['status'] ?? '').toString();
+          if (status != 'dibatalkan') {
+            final rawTgl = (r['tanggal_reservasi'] ?? '').toString();
+            if (rawTgl.startsWith(formattedDate)) {
+              final jam = (r['jam_mulai'] ?? '').toString();
+              final dur = r['durasi_jam'] is int
+                  ? r['durasi_jam'] as int
+                  : int.tryParse(r['durasi_jam']?.toString() ?? '1') ?? 1;
+              final startHour = int.tryParse(jam.split(':').first) ?? 0;
+              final endHour = startHour + dur;
+              final endStr = "${endHour.toString().padLeft(2, '0')}:00";
+              bookedSlots.add({
+                'jam_mulai': jam,
+                'jam_selesai': endStr,
+                'durasi': dur,
+              });
+            }
+          }
+        }
+      }
+
+      final slotResult = await _spaceService.checkAvailability(
+        idSpace: _space.id,
+        tanggal: formattedDate,
+        jamMulai: formattedTime,
+        durasiJam: _durationHours,
+      );
+
+      if (!mounted || requestId != _availabilityRequestId) return;
+
+      final bool isAvail = slotResult['is_available'] == true || slotResult['available'] == true;
+      final conflicts = (slotResult['conflicts'] as List<dynamic>?) ?? [];
+
+      final endMinutes = startMinutes + (_durationHours * 60);
+      final endHourStr =
+          "${(endMinutes ~/ 60).toString().padLeft(2, '0')}:${(endMinutes % 60).toString().padLeft(2, '0')}";
+
+      if (!isAvail || conflicts.isNotEmpty) {
+        String conflictInfo = 'Jam $formattedTime - $endHourStr sudah dibooking oleh orang lain.';
+        if (conflicts.isNotEmpty && conflicts.first is Map<String, dynamic>) {
+          final c = conflicts.first as Map<String, dynamic>;
+          final cJam = c['jam_mulai']?.toString() ?? formattedTime;
+          final cDur = c['durasi_jam'] ?? _durationHours;
+          conflictInfo = 'Jam $cJam ($cDur Jam) sudah dibooking oleh orang lain.';
+        }
+
+        setState(() {
+          _isSlotAvailable = false;
+          _availabilityStatusText = '$conflictInfo Silakan pilih jam atau tanggal lain.';
+          _bookedSlotsForSelectedDate = bookedSlots;
+          _isCheckingAvailability = false;
+        });
+      } else {
+        setState(() {
+          _isSlotAvailable = true;
+          _availabilityStatusText =
+              'Jam $formattedTime - $endHourStr ($_durationHours Jam) tersedia untuk dipesan.';
+          _bookedSlotsForSelectedDate = bookedSlots;
+          _isCheckingAvailability = false;
+        });
+      }
+    } catch (_) {
+      if (!mounted || requestId != _availabilityRequestId) return;
+      setState(() {
+        _isCheckingAvailability = false;
+      });
+    }
+  }
+
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -166,6 +280,7 @@ class _BookingScreenState extends State<BookingScreen> {
     if (!mounted) return;
     if (picked != null && picked != _selectedDate) {
       setState(() => _selectedDate = picked);
+      _checkAvailabilityRealtime();
     }
   }
 
@@ -189,6 +304,7 @@ class _BookingScreenState extends State<BookingScreen> {
     if (!mounted) return;
     if (picked != null && picked != _selectedTime) {
       setState(() => _selectedTime = picked);
+      _checkAvailabilityRealtime();
     }
   }
 
@@ -218,6 +334,16 @@ class _BookingScreenState extends State<BookingScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('ID Space tidak valid. Silakan pilih kembali space.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    if (!_isSlotAvailable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_availabilityStatusText ?? 'Jadwal jam ini sudah dibooking. Silakan pilih jam lain.'),
           backgroundColor: AppColors.error,
         ),
       );
@@ -467,6 +593,63 @@ class _BookingScreenState extends State<BookingScreen> {
                       ),
                     ),
 
+                    if (_bookedSlotsForSelectedDate.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFBEB),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFFDE68A), width: 0.8),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: const [
+                                Icon(Icons.schedule, size: 14, color: Color(0xFFD97706)),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Jadwal yang sudah terisi pada tanggal ini:',
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              children: _bookedSlotsForSelectedDate.map((slot) {
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.rose50,
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(color: AppColors.rose200, width: 0.8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 5,
+                                        height: 5,
+                                        decoration: const BoxDecoration(color: AppColors.rose600, shape: BoxShape.circle),
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        '${slot['jam_mulai']} - ${slot['jam_selesai']} (${slot['durasi']} Jam)',
+                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.rose700),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
                     const SizedBox(height: 14),
 
                     // Jam Mulai & Durasi
@@ -494,24 +677,27 @@ class _BookingScreenState extends State<BookingScreen> {
                                     vertical: 12,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: Colors.white,
+                                    color: !_isSlotAvailable ? const Color(0xFFFFF1F2) : Colors.white,
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: AppColors.border, width: 0.9),
+                                    border: Border.all(
+                                      color: !_isSlotAvailable ? AppColors.rose500 : AppColors.border,
+                                      width: !_isSlotAvailable ? 1.2 : 0.9,
+                                    ),
                                   ),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
                                       Text(
                                         _selectedTime.format(context),
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w600,
-                                          color: AppColors.textPrimary,
+                                          color: !_isSlotAvailable ? AppColors.rose700 : AppColors.textPrimary,
                                         ),
                                       ),
-                                      const Icon(
+                                      Icon(
                                         Icons.access_time,
-                                        color: AppColors.accentBlue,
+                                        color: !_isSlotAvailable ? AppColors.rose600 : AppColors.accentBlue,
                                         size: 18,
                                       ),
                                     ],
@@ -548,7 +734,10 @@ class _BookingScreenState extends State<BookingScreen> {
                                     IconButton(
                                       icon: const Icon(Icons.remove, size: 18),
                                       onPressed: _durationHours > 1
-                                          ? () => setState(() => _durationHours--)
+                                          ? () {
+                                              setState(() => _durationHours--);
+                                              _checkAvailabilityRealtime();
+                                            }
                                           : null,
                                     ),
                                     Text(
@@ -562,7 +751,10 @@ class _BookingScreenState extends State<BookingScreen> {
                                     IconButton(
                                       icon: const Icon(Icons.add, size: 18),
                                       onPressed: _durationHours < 24
-                                          ? () => setState(() => _durationHours++)
+                                          ? () {
+                                              setState(() => _durationHours++);
+                                              _checkAvailabilityRealtime();
+                                            }
                                           : null,
                                     ),
                                   ],
@@ -573,6 +765,86 @@ class _BookingScreenState extends State<BookingScreen> {
                         ),
                       ],
                     ),
+
+                    const SizedBox(height: 10),
+
+                    // Proactive Live Availability Status Banner (Stitch Design)
+                    if (_isCheckingAvailability)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.border, width: 0.8),
+                        ),
+                        child: Row(
+                          children: const [
+                            SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              'Memeriksa ketersediaan jam...',
+                              style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                            ),
+                          ],
+                        ),
+                      )
+                    else if (!_isSlotAvailable)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.rose50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.rose200),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.cancel_outlined, size: 16, color: AppColors.rose600),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _availabilityStatusText ??
+                                    'Jam tersebut sudah dibooking oleh orang lain. Silakan pilih jam lain.',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppColors.rose700,
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.emerald50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.emerald200),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.check_circle_outline, size: 16, color: AppColors.emerald700),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _availabilityStatusText ?? 'Jam tersedia untuk dipesan.',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppColors.emerald700,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
 
                     const SizedBox(height: 18),
 
@@ -801,9 +1073,13 @@ class _BookingScreenState extends State<BookingScreen> {
                 border: Border(top: BorderSide(color: AppColors.border)),
               ),
               child: AppButton(
-                text: 'Konfirmasi Reservasi',
+                text: !_isSlotAvailable
+                    ? 'Jam Sudah Terisi (Pilih Jam Lain)'
+                    : 'Konfirmasi Reservasi',
                 isLoading: _isLoading,
-                onPressed: (_isLoading || _isCheckingPromo) ? null : _handleBooking,
+                onPressed: (_isLoading || _isCheckingPromo || _isCheckingAvailability || !_isSlotAvailable)
+                    ? null
+                    : _handleBooking,
               ),
             ),
           ],
